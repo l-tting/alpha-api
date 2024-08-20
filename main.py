@@ -1,8 +1,9 @@
 from flask import Flask,render_template,redirect,url_for,request,jsonify,session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func,select
-
+from flask_cors import CORS
 import sentry_sdk
+
 
 
 sentry_sdk.init(
@@ -42,6 +43,7 @@ class Sale(db.Model):
 with app.app_context():
     db.create_all()
 
+CORS(app, resources={r"/product/*": {"origins": "http://127.0.0.1:5500"}})
 
 
 @app.route('/product',methods=['GET','POST'])
