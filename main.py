@@ -2,6 +2,22 @@ from flask import Flask,render_template,redirect,url_for,request,jsonify,session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func,select
 
+import sentry_sdk
+
+
+sentry_sdk.init(
+    dsn="https://21e08db32f0ebdc59435ea39220fe306@o4507805034938368.ingest.us.sentry.io/4507805083893760",
+    # Set traces_sample_rate to 1.0 to capture 100%
+    # of transactions for tracing.
+    traces_sample_rate=1.0,
+    # Set profiles_sample_rate to 1.0 to profile 100%
+    # of sampled transactions.
+    # We recommend adjusting this value in production.
+    profiles_sample_rate=1.0,
+)
+
+
+
 app =  Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI']= 'postgresql://postgres:6979@localhost/postmandb'
 db = SQLAlchemy(app)
@@ -28,7 +44,7 @@ with app.app_context():
 
 
 
-@app.route('/',methods=['GET','POST'])
+@app.route('/product',methods=['GET','POST'])
 def product():
     if request.method == 'POST':
         try:
@@ -73,11 +89,24 @@ def sales():
     elif request.method == 'GET':
         sales = db.session.execute(db.select(Sale).order_by(Sale.pid)).scalars()
         for sale in sales:
-            sall =[{
+            sale_data =[{
                 'product': sale.product.name,
                 'quantity':sale.quantity
             }]
-        return jsonify({"sales":sall}),200
+        return jsonify({"sales":sale_data}),200
+    
+
+# testing sentry  
+@app.route('/sentry_error')
+def hello_world():
+    try:
+        division_by_zero = 1 / 0
+        return jsonify({"result": division_by_zero})
+    except Exception as e:
+        sentry_sdk.capture_exception(e)
+        return jsonify({"error":str(e)})
+        
+    
 
 if __name__ == '__main__':
     app.run(debug=True)
