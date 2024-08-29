@@ -3,6 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func,select
 from flask_cors import CORS
 import sentry_sdk
+import jwt
+from datetime import datetime,timedelta
+from functools import wraps
 
 
 
@@ -20,6 +23,7 @@ sentry_sdk.init(
 
 
 app =  Flask(__name__)
+app.config['SECRET_KEY']='secretkey'
 app.config['SQLALCHEMY_DATABASE_URI']= 'postgresql://postgres:6979@localhost/postmandb'
 db = SQLAlchemy(app)
 
@@ -40,12 +44,22 @@ class Sale(db.Model):
     quantity = db.Column(db.Integer,nullable= False)
     created_at = db.Column(db.DateTime,server_default = func.now())
 
+class User(db.Model):
+    __tablename__= 'users'
+    id = db.Column(db.Integer,primary_key=True)
+    name = db.Column(db.String,nullable=False)
+    email = db.Column(db.String,nullable=False)
+    password = db.Column(db.String,nullable=False)
+
+
 with app.app_context():
     db.create_all()
 
-CORS(app, resources={r"/product/*": {"origins": "http://127.0.0.1:5500"}
-                     ,r"/sales/*": {"origins": "http://127.0.0.1:5500"},
-                     r"/dashboard/*":{"origins":"http://127.0.0.1:5500"}})
+CORS(app, resources={
+    r"/product/*": {"origins": "http://127.0.0.1:5500"},
+    r"/sales/*": {"origins": "http://127.0.0.1:5500"},
+    r"/dashboard/*": {"origins": "http://127.0.0.1:5500"}
+})
 
 
 
@@ -79,10 +93,26 @@ def product():
 
             })
         return jsonify({"products": prods}) ,200
-
+    
+def token_required(f):
+    @wraps(f)
+    def decorated(*args,**kwargs):
+        #checking if the token exists in the http
+        token = request.headers.get("Authorization")
+        if token is None:
+            return jsonify({"message":"token is missing"})
+        try:
+            #takes in token ,secret key and the algorithm used to hash
+            data = jwt.decode(token,app.config['SECRET_KEY'],algorithms=['HS256'])
+            current_user = data['sub']
+            return f(current_user,*args,**kwargs)
+        except:
+            return jsonify({"error":"error decoding token,confirm your secret key"})
+    return decorated
 
 @app.route('/sales',methods=['GET','POST'])
-def sales():
+@token_required
+def sales(current_user):
     if request.method == 'POST':
         try:
             data = request.json
@@ -95,6 +125,10 @@ def sales():
         except Exception as e:
             return jsonify({"error":str(e)}),500
     elif request.method == 'GET':
+        user = db.session.query(User).filter(User.name == current_user).first()
+
+        if not user:
+            return jsonify({"message":"user not found"}),404
         sales = db.session.execute(db.select(Sale).order_by(Sale.pid)).scalars()
         sale_data = []
         for sale in sales:
@@ -123,21 +157,7 @@ def dashboard():
     sales_data = [{'date':str(day),'total_sales':sales} for day,sales in sales_per_day]
     profit_data =[{'date':str(day),'profit':profit} for day,profit in profit_per_day]
 
-    # sales_data=[]
-    # profit_data = []
-    # for day,sale in sales_per_day:
-    #     sales_data.append({
-    #         "day":day,
-    #         "total_sales":sale
-    #     })
-    # for day,profit in profit_per_day:
-    #     profit_data.append(
-    #         {
-    #             "day":day,
-    #             "profit":profit
-    #         }
-    #     )
-# ,{"profit_day":profit_data}
+    
     return jsonify({"sales_per_day":sales_data,"profit_per_day":profit_data}),200
 
 # testing sentry  
@@ -149,8 +169,54 @@ def hello_world():
     except Exception as e:
         sentry_sdk.capture_exception(e)
         return jsonify({"error":str(e)})
-        
+
+@app.route('/user',methods=['GET','POST'])
+def users():
+    if request.method == 'POST':
+        try:
+            data = request.json
+            name = data['name']
+            email = data['email']
+            password = data['password']
+            user = User(name=name,email=email,password=password)
+            db.session.add(user)
+            db.session.commit()
+            return jsonify({"success":"user added successfully"}),201
+        except Exception as e:
+            return jsonify({"error adding user":e}),500
+    elif request.method == 'GET':
+        users = db.session.execute(db.select(User).order_by(User.name)).scalars()
+        user_data = []
+        for user in users:
+            user_data.append({
+                "name": user.name,
+                "email":user.email,
+                "password":user.password
+            })
+        return jsonify({"users":user_data}),200
+
+
     
+
+
+#creating token
+@app.post("/login")
+def login_user():
+    data = request.json
+
+    u = data['username']
+    p = data['password']
+    existing_user = db.session.query(User).filter(User.name ==u,User.password==p).first()
+
+    if not existing_user:
+        return jsonify({"Login failed": "confirm credentials"}),401
+    try :
+        access_token = jwt.encode({"sub":u,"exp":datetime.utcnow()+ timedelta(minutes=30)},app.config['SECRET_KEY'])
+        return jsonify({"message":"login sucessful","access token":access_token})
+    except Exception as e:
+        return jsonify({"error creating access token": e})
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
