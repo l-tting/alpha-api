@@ -28,42 +28,10 @@ app.config['SECRET_KEY']='secretkey'
 CORS(app, resources={
     r"/product/*": {"origins": "http://127.0.0.1:5500"},
     r"/sales/*": {"origins": "http://127.0.0.1:5500"},
-    r"/dashboard/*": {"origins": "http://127.0.0.1:5500"}
+    r"/dashboard/*": {"origins": "http://127.0.0.1:5500"},
+     r"/login/*": {"origins": "http://127.0.0.1:5500"}
 })
 
-
-
-@app.route('/product',methods=['GET','POST'])
-def product():
-    if request.method == 'POST':
-        try:
-            data = request.json
-            name = data['name']
-            buying_price = data['buying_price']
-            selling_price = data['selling_price']
-            stock_quantity = data['stock_quantity']
-
-            product = Product(name=name,buying_price=buying_price,selling_price=selling_price,stock_quantity=stock_quantity)
-            db.session.add(product)
-            db.session.commit()
-            return jsonify({"message":"product added successfully"}),201
-        except Exception as e:
-            return jsonify({'error':str(e)}),500
-    elif request.method == 'GET':
-        products = db.session.execute(db.select(Product).order_by(Product.id)).scalars()
-        prods =[]
-        for product in products:
-            prods.append({
-                
-                "id":product.id,
-                "name":product.name,
-                "buying_price":product.buying_price,
-                "selling_price":product.selling_price,
-                "stock_quantity":product.stock_quantity
-
-            })
-        return jsonify({"products": prods}) ,200
-    
 def token_required(f):
     @wraps(f)
     def decorated(*args,**kwargs):
@@ -79,6 +47,43 @@ def token_required(f):
         except:
             return jsonify({"error":"error decoding token,confirm your secret key"})
     return decorated
+
+@app.route('/product',methods=['GET','POST'])
+@token_required
+def product(current_user):
+    if request.method == 'POST':
+        try:
+            data = request.json
+            name = data['name']
+            buying_price = data['buying_price']
+            selling_price = data['selling_price']
+            stock_quantity = data['stock_quantity']
+
+            product = Product(name=name,buying_price=buying_price,selling_price=selling_price,stock_quantity=stock_quantity)
+            db.session.add(product)
+            db.session.commit()
+            return jsonify({"message":"product added successfully"}),201
+        except Exception as e:
+            return jsonify({'error':str(e)}),500
+    elif request.method == 'GET':
+        user = db.session.query(User).filter(User.name == current_user).first()
+        if not user:
+            return jsonify({"message":"user not found"}),404
+        products = db.session.execute(db.select(Product).order_by(Product.id)).scalars()
+        prods =[]
+        for product in products:
+            prods.append({
+                
+                "id":product.id,
+                "name":product.name,
+                "buying_price":product.buying_price,
+                "selling_price":product.selling_price,
+                "stock_quantity":product.stock_quantity
+
+            })
+        return jsonify({"products": prods}) ,200
+    
+
 
 @app.route('/sales',methods=['GET','POST'])
 @token_required
@@ -182,7 +187,7 @@ def login_user():
         return jsonify({"Login failed": "confirm credentials"}),401
     try :
         access_token = jwt.encode({"sub":u,"exp":datetime.utcnow()+ timedelta(minutes=30)},app.config['SECRET_KEY'])
-        return jsonify({"message":"login successful","access token":access_token})
+        return jsonify({"message":"login successful","access_token":access_token})
     except Exception as e:
         return jsonify({"error creating access token": e})
 
